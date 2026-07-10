@@ -34,7 +34,7 @@ jobs:
         with:
           version: "1.5.57"
 
-      - name: Render del notebook (corre el pipeline completo: datos -> modelo -> forecast)
+      - name: "Render del notebook (pipeline completo: datos -> modelo -> forecast)"
         run: quarto render
 
       - name: Publicar en GitHub Pages (rama gh-pages)
