@@ -13,6 +13,7 @@ paquetes <- c(
   "ggplot2",
   "plotly",
   "knitr",
+  "rmarkdown",
   "scales",
   "DT"
 )
