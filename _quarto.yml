@@ -1,0 +1,25 @@
+project:
+  type: website
+  output-dir: docs
+
+website:
+  title: "Demand Planning Notebook"
+  description: "Forecasting reproducible de demanda con Prophet + R + Quarto"
+  site-url: "https://lcarrenoy.github.io/demand-planning-notebook/"
+  repo-url: "https://github.com/lcarrenoy/demand-planning-notebook"
+  repo-actions: [issue]
+  page-footer:
+    left: "Luis Carreño · {{< meta date >}}"
+    right:
+      - icon: github
+        href: https://github.com/lcarrenoy
+  navbar:
+    left:
+      - href: index.qmd
+        text: Notebook
+
+format:
+  html:
+    theme: cosmo
+    css: styles.css
+    toc: true

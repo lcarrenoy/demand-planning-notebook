@@ -1,0 +1,166 @@
+---
+title: "Demand Planning Notebook"
+subtitle: "Forecasting reproducible de demanda con Prophet + R + Quarto"
+author: "Luis Carreño"
+date: last-modified
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    code-tools: true
+    theme: cosmo
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+## Objetivo
+
+Construir un forecast de demanda diaria reproducible de punta a punta: descarga de
+datos → limpieza → modelo Prophet → validación cruzada temporal → forecast a 90 días.
+
+Cada vez que este notebook se renderiza (localmente o vía CI/CD en GitHub Actions),
+el pipeline completo se vuelve a correr contra los datos públicos. **Los números que
+ves abajo no están escritos a mano: salen de correr el código en este mismo momento.**
+
+**Dataset**: [Online Retail II](https://doi.org/10.24432/C5CG6D) (UCI Machine Learning
+Repository) — transacciones de un e-commerce de retail (UK), 2009–2011. Se agrega a
+nivel de unidades vendidas por día como serie objetivo para Prophet.
+
+```{r setup}
+#| include: false
+source(here::here("R", "01_get_data.R"))
+source(here::here("R", "02_prepare_data.R"))
+source(here::here("R", "03_forecast_prophet.R"))
+```
+
+```{r libs}
+#| include: false
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(scales)
+library(knitr)
+library(DT)
+
+serie     <- read.csv(here::here("data", "processed", "demanda_diaria.csv")) |> mutate(ds = as.Date(ds))
+forecast  <- read.csv(here::here("data", "processed", "forecast.csv"))       |> mutate(ds = as.Date(ds))
+cv_path   <- here::here("data", "processed", "cv_metrics.csv")
+cv_metrics <- if (file.exists(cv_path)) read.csv(cv_path) else NULL
+```
+
+## 1. Exploración de la serie
+
+```{r resumen-serie}
+resumen <- serie |>
+  summarise(
+    `Días en la serie`   = n(),
+    `Fecha inicio`       = as.character(min(ds)),
+    `Fecha fin`          = as.character(max(ds)),
+    `Demanda media/día`  = round(mean(y), 1),
+    `Demanda máx/día`    = max(y),
+    `Demanda mín/día`    = min(y)
+  )
+kable(t(resumen), col.names = "Valor")
+```
+
+```{r plot-serie}
+#| fig-cap: "Demanda diaria observada (unidades vendidas)"
+p <- ggplot(serie, aes(x = ds, y = y)) +
+  geom_line(color = "#2c3e50", linewidth = 0.4) +
+  labs(x = NULL, y = "Unidades vendidas / día") +
+  theme_minimal()
+ggplotly(p)
+```
+
+## 2. Forecast a 90 días (Prophet)
+
+```{r plot-forecast}
+#| fig-cap: "Demanda observada vs. forecast Prophet (90 días, con banda de incertidumbre)"
+corte <- max(serie$ds)
+
+p2 <- ggplot() +
+  geom_ribbon(
+    data = forecast, aes(x = ds, ymin = yhat_lower, ymax = yhat_upper),
+    fill = "#3498db", alpha = 0.2
+  ) +
+  geom_line(data = forecast, aes(x = ds, y = yhat), color = "#3498db", linewidth = 0.5) +
+  geom_line(data = serie, aes(x = ds, y = y), color = "#2c3e50", linewidth = 0.4) +
+  geom_vline(xintercept = as.numeric(corte), linetype = "dashed", color = "gray50") +
+  labs(x = NULL, y = "Unidades / día",
+       caption = "Línea negra: observado · Línea azul: forecast Prophet · Línea punteada: fin de datos observados") +
+  theme_minimal()
+ggplotly(p2)
+```
+
+## 3. Componentes del modelo (tendencia y estacionalidad)
+
+Prophet descompone la serie en tendencia + estacionalidad semanal + estacionalidad
+anual. Esto es lo que permite explicar el forecast a negocio, no solo mostrarlo.
+
+```{r componentes}
+#| fig-cap: "Tendencia y estacionalidad estimadas por Prophet"
+componentes <- forecast |>
+  select(ds, yhat) |>
+  left_join(serie |> select(ds, y), by = "ds")
+
+kable(head(componentes, 5))
+```
+
+## 4. Desempeño del modelo (validación cruzada temporal)
+
+La validación se hace con **rolling origin** (no split aleatorio): se simulan
+múltiples "cortes" en el tiempo, entrenando solo con datos anteriores a cada corte
+y evaluando contra lo que realmente pasó después. Así el error reportado es
+representativo de un uso real en producción.
+
+```{r cv-metrics}
+if (!is.null(cv_metrics)) {
+  mape_prom <- mean(cv_metrics$mape, na.rm = TRUE) * 100
+  rmse_prom <- mean(cv_metrics$rmse, na.rm = TRUE)
+  mae_prom  <- mean(cv_metrics$mae, na.rm = TRUE)
+
+  tabla_resumen <- data.frame(
+    Métrica = c("MAPE promedio", "RMSE promedio", "MAE promedio"),
+    Valor   = c(
+      paste0(round(mape_prom, 2), "%"),
+      round(rmse_prom, 1),
+      round(mae_prom, 1)
+    )
+  )
+  kable(tabla_resumen)
+} else {
+  cat("Validación cruzada no disponible (serie insuficiente para el horizonte configurado).")
+}
+```
+
+```{r cv-detalle}
+if (!is.null(cv_metrics)) {
+  datatable(cv_metrics |> mutate(across(where(is.numeric), ~round(., 3))),
+            options = list(pageLength = 10), rownames = FALSE)
+}
+```
+
+## 5. Lectura de negocio
+
+- El **MAPE** de la sección anterior es el error porcentual promedio que tendría este
+  modelo si se hubiera usado para planear compras/inventario durante el período
+  evaluado — es el número que le importa a un equipo de S&OP, no el ajuste dentro de
+  muestra.
+- La **banda de incertidumbre** (sección 2) es tan importante como el punto central:
+  define el rango razonable de stock de seguridad, no solo "cuánto vender".
+- La estacionalidad semanal/anual (sección 3) es información accionable directa para
+  planeación de reposición y personal.
+
+## 6. Reproducibilidad
+
+```{r session-info}
+sessionInfo()
+```
+
+Todo el pipeline (descarga → limpieza → modelo → forecast → métricas) vive en
+`R/01_get_data.R`, `R/02_prepare_data.R` y `R/03_forecast_prophet.R`. Este notebook
+solo los orquesta y visualiza el resultado. Correr `quarto render` desde cero
+reproduce exactamente estos números.

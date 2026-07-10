@@ -1,35 +1,23 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-.env
-dist/
-build/
-
-# Node
-node_modules/
-.next/
-.nuxt/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# ML
-mlruns/
-*.pkl
-*.joblib
-
-# Data
+# Datos (se regeneran corriendo el pipeline, no se versionan)
 data/raw/
-*.csv
-*.parquet
+data/processed/
 
-# IDE
-.vscode/
-.idea/
+# Salida de Quarto
+/docs/
+/.quarto/
+*_files/
+*_cache/
 
-# OS
+# R
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+renv/library/
+renv/staging/
+
+# Sistema
 .DS_Store
 Thumbs.db
+
+**/*.quarto_ipynb
