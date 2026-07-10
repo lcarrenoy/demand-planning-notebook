@@ -1,0 +1,58 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "Demand Planning Notebook",
+    "section": "",
+    "text": "Construir un forecast de demanda diaria reproducible de punta a punta: descarga de datos → limpieza → modelo Prophet → validación cruzada temporal → forecast a 90 días.\nCada vez que este notebook se renderiza (localmente o vía CI/CD en GitHub Actions), el pipeline completo se vuelve a correr contra los datos públicos. Los números que ves abajo no están escritos a mano: salen de correr el código en este mismo momento.\nDataset: Online Retail II (UCI Machine Learning Repository) — transacciones de un e-commerce de retail (UK), 2009–2011. Se agrega a nivel de unidades vendidas por día como serie objetivo para Prophet."
+  },
+  {
+    "objectID": "index.html#objetivo",
+    "href": "index.html#objetivo",
+    "title": "Demand Planning Notebook",
+    "section": "",
+    "text": "Construir un forecast de demanda diaria reproducible de punta a punta: descarga de datos → limpieza → modelo Prophet → validación cruzada temporal → forecast a 90 días.\nCada vez que este notebook se renderiza (localmente o vía CI/CD en GitHub Actions), el pipeline completo se vuelve a correr contra los datos públicos. Los números que ves abajo no están escritos a mano: salen de correr el código en este mismo momento.\nDataset: Online Retail II (UCI Machine Learning Repository) — transacciones de un e-commerce de retail (UK), 2009–2011. Se agrega a nivel de unidades vendidas por día como serie objetivo para Prophet."
+  },
+  {
+    "objectID": "index.html#exploración-de-la-serie",
+    "href": "index.html#exploración-de-la-serie",
+    "title": "Demand Planning Notebook",
+    "section": "1. Exploración de la serie",
+    "text": "1. Exploración de la serie\n\n\nCode\nresumen &lt;- serie |&gt;\n  summarise(\n    `Días en la serie`   = n(),\n    `Fecha inicio`       = as.character(min(ds)),\n    `Fecha fin`          = as.character(max(ds)),\n    `Demanda media/día`  = round(mean(y), 1),\n    `Demanda máx/día`    = max(y),\n    `Demanda mín/día`    = min(y)\n  )\nkable(t(resumen), col.names = \"Valor\")\n\n\n\n\n\n\nValor\n\n\n\n\nDías en la serie\n604\n\n\nFecha inicio\n2009-12-01\n\n\nFecha fin\n2011-12-09\n\n\nDemanda media/día\n18878.9\n\n\nDemanda máx/día\n125513\n\n\nDemanda mín/día\n2048\n\n\n\n\n\n\n\nCode\np &lt;- ggplot(serie, aes(x = ds, y = y)) +\n  geom_line(color = \"#2c3e50\", linewidth = 0.4) +\n  labs(x = NULL, y = \"Unidades vendidas / día\") +\n  theme_minimal()\nggplotly(p)\n\n\n\n\nDemanda diaria observada (unidades vendidas)"
+  },
+  {
+    "objectID": "index.html#forecast-a-90-días-prophet",
+    "href": "index.html#forecast-a-90-días-prophet",
+    "title": "Demand Planning Notebook",
+    "section": "2. Forecast a 90 días (Prophet)",
+    "text": "2. Forecast a 90 días (Prophet)\n\n\nCode\ncorte &lt;- max(serie$ds)\n\np2 &lt;- ggplot() +\n  geom_ribbon(\n    data = forecast, aes(x = ds, ymin = yhat_lower, ymax = yhat_upper),\n    fill = \"#3498db\", alpha = 0.2\n  ) +\n  geom_line(data = forecast, aes(x = ds, y = yhat), color = \"#3498db\", linewidth = 0.5) +\n  geom_line(data = serie, aes(x = ds, y = y), color = \"#2c3e50\", linewidth = 0.4) +\n  geom_vline(xintercept = as.numeric(corte), linetype = \"dashed\", color = \"gray50\") +\n  labs(x = NULL, y = \"Unidades / día\",\n       caption = \"Línea negra: observado · Línea azul: forecast Prophet · Línea punteada: fin de datos observados\") +\n  theme_minimal()\nggplotly(p2)\n\n\n\n\nDemanda observada vs. forecast Prophet (90 días, con banda de incertidumbre)"
+  },
+  {
+    "objectID": "index.html#componentes-del-modelo-tendencia-y-estacionalidad",
+    "href": "index.html#componentes-del-modelo-tendencia-y-estacionalidad",
+    "title": "Demand Planning Notebook",
+    "section": "3. Componentes del modelo (tendencia y estacionalidad)",
+    "text": "3. Componentes del modelo (tendencia y estacionalidad)\nProphet descompone la serie en tendencia + estacionalidad semanal + estacionalidad anual. Esto es lo que permite explicar el forecast a negocio, no solo mostrarlo.\n\n\nCode\ncomponentes &lt;- forecast |&gt;\n  select(ds, yhat) |&gt;\n  left_join(serie |&gt; select(ds, y), by = \"ds\")\n\nkable(head(componentes, 5))\n\n\n\n\n\nds\nyhat\ny\n\n\n\n\n2009-12-01\n34308.68\n26176\n\n\n2009-12-02\n33189.26\n31891\n\n\n2009-12-03\n36251.34\n49241\n\n\n2009-12-04\n30015.53\n21307\n\n\n2009-12-05\n25519.15\n5119\n\n\n\nTendencia y estacionalidad estimadas por Prophet"
+  },
+  {
+    "objectID": "index.html#desempeño-del-modelo-validación-cruzada-temporal",
+    "href": "index.html#desempeño-del-modelo-validación-cruzada-temporal",
+    "title": "Demand Planning Notebook",
+    "section": "4. Desempeño del modelo (validación cruzada temporal)",
+    "text": "4. Desempeño del modelo (validación cruzada temporal)\nLa validación se hace con rolling origin (no split aleatorio): se simulan múltiples “cortes” en el tiempo, entrenando solo con datos anteriores a cada corte y evaluando contra lo que realmente pasó después. Así el error reportado es representativo de un uso real en producción.\n\n\nCode\nif (!is.null(cv_metrics)) {\n  mape_prom &lt;- mean(cv_metrics$mape, na.rm = TRUE) * 100\n  rmse_prom &lt;- mean(cv_metrics$rmse, na.rm = TRUE)\n  mae_prom  &lt;- mean(cv_metrics$mae, na.rm = TRUE)\n\n  tabla_resumen &lt;- data.frame(\n    Métrica = c(\"MAPE promedio\", \"RMSE promedio\", \"MAE promedio\"),\n    Valor   = c(\n      paste0(round(mape_prom, 2), \"%\"),\n      round(rmse_prom, 1),\n      round(mae_prom, 1)\n    )\n  )\n  kable(tabla_resumen)\n} else {\n  cat(\"Validación cruzada no disponible (serie insuficiente para el horizonte configurado).\")\n}\n\n\n\n\n\nMétrica\nValor\n\n\n\n\nMAPE promedio\n49.09%\n\n\nRMSE promedio\n9308.8\n\n\nMAE promedio\n6544.8\n\n\n\n\n\n\n\nCode\nif (!is.null(cv_metrics)) {\n  datatable(cv_metrics |&gt; mutate(across(where(is.numeric), ~round(., 3))),\n            options = list(pageLength = 10), rownames = FALSE)\n}"
+  },
+  {
+    "objectID": "index.html#lectura-de-negocio",
+    "href": "index.html#lectura-de-negocio",
+    "title": "Demand Planning Notebook",
+    "section": "5. Lectura de negocio",
+    "text": "5. Lectura de negocio\n\nEl MAPE de la sección anterior es el error porcentual promedio que tendría este modelo si se hubiera usado para planear compras/inventario durante el período evaluado — es el número que le importa a un equipo de S&OP, no el ajuste dentro de muestra.\nLa banda de incertidumbre (sección 2) es tan importante como el punto central: define el rango razonable de stock de seguridad, no solo “cuánto vender”.\nLa estacionalidad semanal/anual (sección 3) es información accionable directa para planeación de reposición y personal."
+  },
+  {
+    "objectID": "index.html#reproducibilidad",
+    "href": "index.html#reproducibilidad",
+    "title": "Demand Planning Notebook",
+    "section": "6. Reproducibilidad",
+    "text": "6. Reproducibilidad\n\n\nCode\nsessionInfo()\n\n\nR version 4.3.2 (2023-10-31)\nPlatform: x86_64-pc-linux-gnu (64-bit)\nRunning under: Ubuntu 24.04.4 LTS\n\nMatrix products: default\nBLAS:   /usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3 \nLAPACK: /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.26.so;  LAPACK version 3.12.0\n\nlocale:\n [1] LC_CTYPE=C.UTF-8       LC_NUMERIC=C           LC_TIME=C.UTF-8       \n [4] LC_COLLATE=C.UTF-8     LC_MONETARY=C.UTF-8    LC_MESSAGES=C.UTF-8   \n [7] LC_PAPER=C.UTF-8       LC_NAME=C              LC_ADDRESS=C          \n[10] LC_TELEPHONE=C         LC_MEASUREMENT=C.UTF-8 LC_IDENTIFICATION=C   \n\ntime zone: UTC\ntzcode source: system (glibc)\n\nattached base packages:\n[1] stats     graphics  grDevices utils     datasets  methods   base     \n\nother attached packages:\n [1] DT_0.34.0       knitr_1.51      scales_1.4.0    plotly_4.12.0  \n [5] ggplot2_4.0.3   prophet_1.1.7   rlang_1.3.0     Rcpp_1.1.2     \n [9] lubridate_1.9.5 here_1.0.2      dplyr_1.2.1     readxl_1.5.0   \n\nloaded via a namespace (and not attached):\n [1] sass_0.4.10           generics_0.1.4        tidyr_1.3.2          \n [4] digest_0.6.39         magrittr_2.0.5        evaluate_1.0.5       \n [7] grid_4.3.2            timechange_0.4.0      RColorBrewer_1.1-3   \n[10] fastmap_1.2.0         cellranger_1.1.0      rprojroot_2.1.1      \n[13] jsonlite_2.0.0        pkgbuild_1.4.8        gridExtra_2.3.1      \n[16] httr_1.4.8            extraDistr_1.10.0.4   purrr_1.2.2          \n[19] crosstalk_1.2.2       viridisLite_0.4.3     QuickJSR_1.10.0      \n[22] jquerylib_0.1.4       lazyeval_0.2.3        codetools_0.2-19     \n[25] cli_3.6.6             cachem_1.1.0          withr_3.0.3          \n[28] yaml_2.3.12           otel_0.2.0            StanHeaders_2.32.10  \n[31] parallel_4.3.2        tools_4.3.2           rstan_2.32.7         \n[34] inline_0.3.21         vctrs_0.7.3           R6_2.6.1             \n[37] matrixStats_1.5.0     stats4_4.3.2          lifecycle_1.0.5      \n[40] htmlwidgets_1.6.4     pkgconfig_2.0.3       bslib_0.11.0         \n[43] RcppParallel_5.1.11-2 pillar_1.11.1         gtable_0.3.6         \n[46] data.table_1.18.4     loo_2.10.0            glue_1.8.1           \n[49] xfun_0.60             tibble_3.3.1          tidyselect_1.2.1     \n[52] farver_2.1.2          htmltools_0.5.9       labeling_0.4.3       \n[55] rmarkdown_2.31        compiler_4.3.2        S7_0.2.2             \n\n\nTodo el pipeline (descarga → limpieza → modelo → forecast → métricas) vive en R/01_get_data.R, R/02_prepare_data.R y R/03_forecast_prophet.R. Este notebook solo los orquesta y visualiza el resultado. Correr quarto render desde cero reproduce exactamente estos números."
+  }
+]
